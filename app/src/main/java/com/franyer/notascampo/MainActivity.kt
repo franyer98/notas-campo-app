@@ -51,10 +51,19 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        val btnWakeWord = Button(this).apply {
+            text = "4. Activar escucha por voz (\"asistente campo\")"
+            setOnClickListener {
+                startForegroundService(Intent(this@MainActivity, WakeWordService::class.java))
+                status.text = "Escuchando en segundo plano. Di \"asistente campo\" y luego tu nota."
+            }
+        }
+
         layout.addView(status)
         layout.addView(btnPermisos)
         layout.addView(btnOverlay)
         layout.addView(btnIniciar)
+        layout.addView(btnWakeWord)
         setContentView(layout)
     }
 

@@ -26,6 +26,10 @@ import java.util.*
  */
 class BubbleService : Service() {
 
+    companion object {
+        const val ACCION_GRABAR_POR_VOZ = "com.franyer.notascampo.GRABAR_POR_VOZ"
+    }
+
     private lateinit var windowManager: WindowManager
     private var bubbleView: android.widget.ImageButton? = null
     private var grabando = false
@@ -42,6 +46,9 @@ class BubbleService : Service() {
     }
 
     override fun onStartCommand(intent: android.content.Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACCION_GRABAR_POR_VOZ && !grabando) {
+            iniciarGrabacionAutomatica()
+        }
         return START_STICKY
     }
 
@@ -150,6 +157,38 @@ class BubbleService : Service() {
         grabando = true
         bubbleView?.setColorFilter(android.graphics.Color.RED)
         Toast.makeText(this, "Grabando... toca de nuevo para enviar", Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * Grabación disparada por la frase clave detectada con Vosk: no hay
+     * botón que tocar para detenerla, así que se corta sola tras un
+     * silencio sostenido (o a los 30s como límite de seguridad).
+     */
+    private fun iniciarGrabacionAutomatica() {
+        iniciarGrabacion()
+        Toast.makeText(this, "Grabando nota por voz...", Toast.LENGTH_SHORT).show()
+
+        val handler = android.os.Handler(mainLooper)
+        var silencioConsecutivo = 0
+        val umbralSilencio = 1500 // amplitud MediaRecorder por debajo de esto cuenta como silencio
+        val chequeosParaCortar = 5 // 5 x 500ms = 2.5s de silencio sostenido
+        var chequeos = 0
+        val maxChequeos = 60 // tope de seguridad: 30s
+
+        val runnable = object : Runnable {
+            override fun run() {
+                val amplitud = try { recorder?.maxAmplitude ?: 0 } catch (e: Exception) { 0 }
+                if (amplitud in 1 until umbralSilencio) silencioConsecutivo++ else if (amplitud >= umbralSilencio) silencioConsecutivo = 0
+                chequeos++
+
+                if ((silencioConsecutivo >= chequeosParaCortar && chequeos > 4) || chequeos >= maxChequeos) {
+                    if (grabando) detenerYSubir()
+                } else {
+                    handler.postDelayed(this, 500)
+                }
+            }
+        }
+        handler.postDelayed(runnable, 500)
     }
 
     private fun detenerYSubir() {
