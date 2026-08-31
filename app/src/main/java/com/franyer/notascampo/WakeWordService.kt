@@ -13,7 +13,7 @@ import androidx.core.app.NotificationCompat
 import org.json.JSONObject
 import org.vosk.Model
 import org.vosk.Recognizer
-import org.vosk.android.StorageService
+import org.vosk.SpeakerModel
 import kotlin.concurrent.thread
 
 /**
@@ -34,6 +34,7 @@ import kotlin.concurrent.thread
 class WakeWordService : Service() {
 
     private var model: Model? = null
+    private var speakerModel: SpeakerModel? = null
     private var audioRecord: AudioRecord? = null
     private var hiloEscucha: Thread? = null
     @Volatile private var seguirEscuchando = false
@@ -87,17 +88,12 @@ class WakeWordService : Service() {
     }
 
     private fun cargarModelo() {
-        StorageService.unpack(
-            this, "model-es", "model",
-            { modeloListo ->
-                model = modeloListo
-                iniciarEscucha()
-                iniciarVigilante()
-            },
-            { excepcion ->
-                actualizarNotificacion("Error cargando modelo: ${excepcion.message}")
-            }
-        )
+        VoiceModels.obtener(this) { modeloVoz, modeloHablante ->
+            model = modeloVoz
+            speakerModel = modeloHablante
+            iniciarEscucha()
+            iniciarVigilante()
+        }
     }
 
     private fun iniciarEscucha() {
@@ -138,7 +134,12 @@ class WakeWordService : Service() {
         }
 
         audioRecord = record
-        val recognizer = Recognizer(modeloActual, sampleRate.toFloat())
+        val hablanteActual = speakerModel
+        val recognizer = if (hablanteActual != null) {
+            Recognizer(modeloActual, sampleRate.toFloat(), hablanteActual)
+        } else {
+            Recognizer(modeloActual, sampleRate.toFloat())
+        }
 
         seguirEscuchando = true
         record.startRecording()
@@ -221,9 +222,59 @@ class WakeWordService : Service() {
         // falsas momentáneas que luego se corrigen solas. Además exigimos
         // que la frase aparezca como palabras completas, no como parte de
         // otra palabra más larga.
+        // Solo comparamos contra resultados FINALES (Vosk ya terminó de
+        // "asentar" esa frase), no parciales — los parciales cambian todo
+        // el tiempo mientras hablas y pueden contener coincidencias
+        // falsas momentáneas que luego se corrigen solas. Además exigimos
+        // que la frase aparezca como palabras completas, no como parte de
+        // otra palabra más larga.
         if (esResultadoFinal && Regex("\\basistente\\s+campo\\b").containsMatchIn(texto.lowercase())) {
-            dispararGrabacion()
+            if (coincideConMiVoz(json)) {
+                dispararGrabacion()
+            } else {
+                actualizarNotificacion("Frase detectada pero la voz no coincide contigo — ignorada")
+            }
         }
+    }
+
+    /**
+     * Compara la huella de voz ("spk", un vector numérico) de este
+     * resultado contra la huella guardada al enrolarte. Si no hay huella
+     * guardada todavía, no filtramos por voz (deja pasar cualquiera) —
+     * evita que la función quede inutilizable si el usuario no se enroló.
+     */
+    private fun coincideConMiVoz(json: String): Boolean {
+        val prefs = getSharedPreferences("notas_campo", MODE_PRIVATE)
+        val huellaGuardada = prefs.getString("huella_voz", null) ?: return true
+
+        val spk = try {
+            JSONObject(json).optJSONArray("spk") ?: return true
+        } catch (e: Exception) {
+            return true
+        }
+        if (spk.length() == 0) return true
+
+        val vectorActual = (0 until spk.length()).map { spk.getDouble(it) }
+        val vectorGuardado = huellaGuardada.split(",").mapNotNull { it.toDoubleOrNull() }
+        if (vectorGuardado.size != vectorActual.size) return true // formatos no comparables, no bloqueamos
+
+        val similitud = similitudCoseno(vectorActual, vectorGuardado)
+        // Umbral aproximado — puede necesitar ajuste según pruebas reales
+        // en campo. Más alto = más estricto (menos falsos positivos de
+        // otras personas, pero más riesgo de no reconocerte a ti mismo
+        // con ruido de fondo).
+        return similitud > 0.45
+    }
+
+    private fun similitudCoseno(a: List<Double>, b: List<Double>): Double {
+        var punto = 0.0; var normaA = 0.0; var normaB = 0.0
+        for (i in a.indices) {
+            punto += a[i] * b[i]
+            normaA += a[i] * a[i]
+            normaB += b[i] * b[i]
+        }
+        if (normaA == 0.0 || normaB == 0.0) return 0.0
+        return punto / (kotlin.math.sqrt(normaA) * kotlin.math.sqrt(normaB))
     }
 
     private fun dispararGrabacion() {

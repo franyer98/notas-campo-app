@@ -53,6 +53,13 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        val btnEnrolar = Button(this).apply {
+            text = "Enrolar mi voz (hazlo antes del paso 4)"
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, EnrollActivity::class.java))
+            }
+        }
+
         val btnWakeWord = Button(this).apply {
             text = "4. Activar escucha por voz (\"asistente campo\")"
             setOnClickListener {
@@ -65,6 +72,7 @@ class MainActivity : AppCompatActivity() {
         layout.addView(btnPermisos)
         layout.addView(btnOverlay)
         layout.addView(btnIniciar)
+        layout.addView(btnEnrolar)
         layout.addView(btnWakeWord)
         setContentView(layout)
     }
