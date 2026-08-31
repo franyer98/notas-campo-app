@@ -11,11 +11,7 @@ import android.view.Gravity
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
-import okhttp3.*
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
-import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -36,8 +32,9 @@ class BubbleService : Service() {
     private var recorder: MediaRecorder? = null
     private var archivoActual: File? = null
 
-    private val client = OkHttpClient()
-    private val backendUrl = "https://notas-campo.onrender.com/notas/upload"
+    // El cliente OkHttp directo ya no se usa aquí — la subida y la cola de
+    // reintentos viven en NotaUploader para poder compartirlas con el
+    // Worker en segundo plano (UploadWorker).
 
     override fun onCreate() {
         super.onCreate()
@@ -211,40 +208,20 @@ class BubbleService : Service() {
         val taskerId = UUID.randomUUID().toString()
         val fechaIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(Date())
 
-        val body = MultipartBody.Builder()
-            .setType(MultipartBody.FORM)
-            .addFormDataPart("tasker_id", taskerId)
-            .addFormDataPart("usuario", "franyer")
-            .addFormDataPart("creado_en_dispositivo", fechaIso)
-            .addFormDataPart(
-                "audio", archivo.name,
-                archivo.asRequestBody("audio/mp4".toMediaType())
-            )
-            .build()
-
-        val request = Request.Builder()
-            .url(backendUrl)
-            .post(body)
-            .build()
-
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                // Guardamos el archivo en una carpeta de pendientes para
-                // reintentar después, igual que hace el flujo de Tasker
-                // con la cola local cuando no hay señal.
-                mostrarToastEnHilo("Sin conexión — nota guardada, se reintentará")
+        // Corre en un hilo aparte: NotaUploader hace la llamada de red de
+        // forma síncrona (execute(), no enqueue()) para poder decidir en
+        // el momento si hay que encolar el archivo como pendiente.
+        Thread {
+            val exito = NotaUploader.subir(archivo, taskerId, "franyer", fechaIso)
+            if (exito) {
+                archivo.delete()
+                mostrarToastEnHilo("Nota enviada ✓")
+            } else {
+                NotaUploader.encolar(this, archivo, "franyer")
+                mostrarToastEnHilo("Sin conexión — nota en cola, se reintentará sola")
+                WorkScheduler.programarReintento(this)
             }
-
-            override fun onResponse(call: Call, response: Response) {
-                if (response.isSuccessful) {
-                    mostrarToastEnHilo("Nota enviada ✓")
-                    archivo.delete()
-                } else {
-                    mostrarToastEnHilo("Error del servidor: ${response.code}")
-                }
-                response.close()
-            }
-        })
+        }.start()
     }
 
     private fun mostrarToastEnHilo(mensaje: String) {

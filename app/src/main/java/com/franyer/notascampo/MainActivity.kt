@@ -22,6 +22,8 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        WorkScheduler.programarRevisionPeriodica(this)
+
         // UI simple hecha por código, sin XML de layout, para mantener el
         // proyecto mínimo y fácil de mantener.
         val layout = LinearLayout(this).apply {

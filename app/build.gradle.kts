@@ -41,4 +41,5 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.alphacephei:vosk-android:0.3.75")
     implementation("net.java.dev.jna:jna:5.14.0@aar")
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 }
