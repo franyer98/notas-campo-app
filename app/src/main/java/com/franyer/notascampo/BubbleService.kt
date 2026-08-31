@@ -39,7 +39,20 @@ class BubbleService : Service() {
     override fun onCreate() {
         super.onCreate()
         iniciarNotificacionForeground()
-        dibujarBurbuja()
+        // Solo dibujamos la burbuja visual si el permiso de superposición
+        // está concedido — si no, seguimos funcionando igual para la
+        // grabación disparada por voz, que no necesita ningún elemento
+        // visual en pantalla. Antes esto no se validaba y tumbaba toda
+        // la app cuando WakeWordService arrancaba este servicio sin que
+        // el usuario hubiera dado el permiso de burbuja todavía.
+        if (android.provider.Settings.canDrawOverlays(this)) {
+            try {
+                dibujarBurbuja()
+            } catch (e: Exception) {
+                // No dejamos que un fallo al dibujar tumbe el servicio —
+                // la grabación por voz debe seguir funcionando igual.
+            }
+        }
     }
 
     override fun onStartCommand(intent: android.content.Intent?, flags: Int, startId: Int): Int {
