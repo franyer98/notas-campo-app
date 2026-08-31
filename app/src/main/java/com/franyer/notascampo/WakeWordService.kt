@@ -44,25 +44,44 @@ class WakeWordService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private lateinit var notificationManager: NotificationManager
+    private val channelId = "wakeword_channel"
+
     private fun iniciarNotificacionForeground() {
-        val channelId = "wakeword_channel"
+        notificationManager = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId, "Escucha por voz", NotificationManager.IMPORTANCE_LOW
             )
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+            notificationManager.createNotificationChannel(channel)
         }
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Escuchando \"asistente campo\"")
-            .setContentText("Di la frase para empezar a dictar una nota")
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .build()
+        actualizarNotificacion("Cargando modelo de voz...")
 
+        val notification = construirNotificacion("Cargando modelo de voz...")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(2, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
         } else {
             startForeground(2, notification)
         }
+    }
+
+    private fun construirNotificacion(texto: String): Notification {
+        return NotificationCompat.Builder(this, channelId)
+            .setContentTitle("Escuchando \"asistente campo\"")
+            .setContentText(texto)
+            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setOngoing(true)
+            .build()
+    }
+
+    /**
+     * Muestra en la notificación lo último que Vosk transcribió — sin esto
+     * no hay forma de saber, en campo, si el micrófono está oyendo bien o
+     * si simplemente no reconoce la frase por acento, ruido, etc.
+     */
+    private fun actualizarNotificacion(texto: String) {
+        if (!::notificationManager.isInitialized) return
+        notificationManager.notify(2, construirNotificacion(texto))
     }
 
     private fun cargarModelo() {
@@ -73,9 +92,11 @@ class WakeWordService : Service() {
             this, "model-es", "model",
             { modeloListo ->
                 model = modeloListo
+                actualizarNotificacion("Listo — di la frase para dictar")
                 iniciarEscucha()
             },
             { excepcion ->
+                actualizarNotificacion("Error cargando modelo: ${excepcion.message}")
                 mostrarToastEnHilo("Error cargando modelo de voz: ${excepcion.message}")
             }
         )
@@ -122,6 +143,8 @@ class WakeWordService : Service() {
         } catch (e: Exception) {
             return
         }
+
+        if (texto.isNotBlank()) actualizarNotificacion("Oyendo: \"$texto\"")
 
         if (texto.lowercase().contains(fraseClave)) {
             dispararGrabacion()
