@@ -101,6 +101,14 @@ class WakeWordService : Service() {
     }
 
     private fun iniciarEscucha() {
+        try {
+            iniciarEscuchaInterno()
+        } catch (e: Throwable) {
+            actualizarNotificacion("Error fatal al iniciar: ${e.javaClass.simpleName} ${e.message}")
+        }
+    }
+
+    private fun iniciarEscuchaInterno() {
         val modeloActual = model ?: return
         detenerEscucha()
 
@@ -137,33 +145,38 @@ class WakeWordService : Service() {
         ultimaActividad = System.currentTimeMillis()
 
         hiloEscucha = thread(start = true) {
-            val buffer = ShortArray(tamanoBuffer)
-            var contadorSilencio = 0
-            while (seguirEscuchando) {
-                val leidos = record.read(buffer, 0, buffer.size)
-                if (leidos <= 0) continue
+            try {
+                val buffer = ShortArray(tamanoBuffer)
+                var contadorSilencio = 0
+                while (seguirEscuchando) {
+                    val leidos = record.read(buffer, 0, buffer.size)
+                    if (leidos <= 0) continue
 
-                // Amplitud máxima del bloque — si se queda en 0 todo el
-                // tiempo, el micrófono no está entregando audio real,
-                // aunque AudioRecord no reporte ningún error.
-                var amplitud = 0
-                for (i in 0 until leidos) {
-                    val v = kotlin.math.abs(buffer[i].toInt())
-                    if (v > amplitud) amplitud = v
+                    // Amplitud máxima del bloque — si se queda en 0 todo el
+                    // tiempo, el micrófono no está entregando audio real,
+                    // aunque AudioRecord no reporte ningún error.
+                    var amplitud = 0
+                    for (i in 0 until leidos) {
+                        val v = kotlin.math.abs(buffer[i].toInt())
+                        if (v > amplitud) amplitud = v
+                    }
+                    contadorSilencio = if (amplitud < 300) contadorSilencio + 1 else 0
+
+                    val bytes = ByteArray(leidos * 2)
+                    for (i in 0 until leidos) {
+                        bytes[i * 2] = (buffer[i].toInt() and 0xFF).toByte()
+                        bytes[i * 2 + 1] = ((buffer[i].toInt() shr 8) and 0xFF).toByte()
+                    }
+
+                    if (!seguirEscuchando) break // pudo cambiar mientras leíamos
+                    val huboResultado = recognizer.acceptWaveForm(bytes, bytes.size)
+                    val json = if (huboResultado) recognizer.result else recognizer.partialResult
+                    procesarResultado(json, amplitud, contadorSilencio)
                 }
-                contadorSilencio = if (amplitud < 300) contadorSilencio + 1 else 0
-
-                val bytes = ByteArray(leidos * 2)
-                for (i in 0 until leidos) {
-                    bytes[i * 2] = (buffer[i].toInt() and 0xFF).toByte()
-                    bytes[i * 2 + 1] = ((buffer[i].toInt() shr 8) and 0xFF).toByte()
-                }
-
-                val huboResultado = recognizer.acceptWaveForm(bytes, bytes.size)
-                val json = if (huboResultado) recognizer.result else recognizer.partialResult
-                procesarResultado(json, amplitud, contadorSilencio)
+            } catch (e: Throwable) {
+                actualizarNotificacion("Error en hilo de audio: ${e.javaClass.simpleName} ${e.message}")
             }
-            recognizer.close()
+            try { recognizer.close() } catch (e: Exception) { /* ya pudo estar cerrado */ }
         }
     }
 
