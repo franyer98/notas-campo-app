@@ -184,10 +184,12 @@ class BubbleService : Service() {
         val chequeosParaCortar = 5 // 5 x 500ms = 2.5s de silencio sostenido
         var chequeos = 0
         val maxChequeos = 60 // tope de seguridad: 30s
+        huboVozReal = false // se resetea en cada grabación nueva
 
         val runnable = object : Runnable {
             override fun run() {
                 val amplitud = try { recorder?.maxAmplitude ?: 0 } catch (e: Exception) { 0 }
+                if (amplitud >= umbralSilencio) huboVozReal = true
                 if (amplitud in 1 until umbralSilencio) silencioConsecutivo++ else if (amplitud >= umbralSilencio) silencioConsecutivo = 0
                 chequeos++
 
@@ -201,6 +203,12 @@ class BubbleService : Service() {
         handler.postDelayed(runnable, 500)
     }
 
+    // Solo se usa en el flujo automático (por voz) — la burbuja manual
+    // siempre sube lo grabado, porque ahí el usuario decidió a propósito
+    // tocarla y detenerla; el riesgo de "alucinación" de Whisper es
+    // específico de grabaciones disparadas solas que pueden quedar vacías.
+    private var huboVozReal = true
+
     private fun detenerYSubir() {
         try {
             recorder?.stop()
@@ -213,6 +221,18 @@ class BubbleService : Service() {
         bubbleView?.clearColorFilter()
 
         val archivo = archivoActual ?: return
+
+        if (!huboVozReal) {
+            // Nunca se detectó voz real durante la grabación — probable
+            // disparo accidental del wake-word. Descartamos aquí mismo
+            // para no mandarle audio vacío a Whisper, que en ese caso
+            // "alucina" texto de subtítulos genéricos en vez de avisar
+            // que no hay nada.
+            archivo.delete()
+            Toast.makeText(this, "No se detectó voz, nota descartada", Toast.LENGTH_SHORT).show()
+            return
+        }
+
         Toast.makeText(this, "Enviando nota...", Toast.LENGTH_SHORT).show()
         subirNota(archivo)
     }
