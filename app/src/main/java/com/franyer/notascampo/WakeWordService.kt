@@ -114,7 +114,7 @@ class WakeWordService : Service() {
 
         val record = try {
             AudioRecord(
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                MediaRecorder.AudioSource.MIC,
                 sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
                 tamanoBuffer * 2
             )
