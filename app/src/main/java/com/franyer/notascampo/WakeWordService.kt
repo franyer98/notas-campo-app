@@ -94,6 +94,7 @@ class WakeWordService : Service() {
                 model = modeloListo
                 actualizarNotificacion("Listo — di la frase para dictar")
                 iniciarEscucha()
+                iniciarVigilante()
             },
             { excepcion ->
                 actualizarNotificacion("Error cargando modelo: ${excepcion.message}")
@@ -104,10 +105,20 @@ class WakeWordService : Service() {
 
     private fun iniciarEscucha() {
         val modeloActual = model ?: return
-        val recognizer = Recognizer(modeloActual, 16000.0f)
 
-        speechService = SpeechService(recognizer, 16000.0f)
-        speechService?.startListening(object : RecognitionListener {
+        // Liberamos cualquier instancia previa antes de crear una nueva —
+        // reutilizar el mismo Recognizer/SpeechService tras un timeout
+        // puede dejarlo en un estado que ya no entrega resultados.
+        try {
+            speechService?.stop()
+            speechService?.shutdown()
+        } catch (e: Exception) { /* no había nada corriendo aún */ }
+
+        val recognizer = Recognizer(modeloActual, 16000.0f)
+        val nuevoServicio = SpeechService(recognizer, 16000.0f)
+        speechService = nuevoServicio
+
+        nuevoServicio.startListening(object : RecognitionListener {
             override fun onPartialResult(hypothesis: String?) {
                 revisarTexto(hypothesis)
             }
@@ -121,21 +132,25 @@ class WakeWordService : Service() {
             }
 
             override fun onError(exception: Exception?) {
-                mostrarToastEnHilo("Error de escucha: ${exception?.message}")
+                actualizarNotificacion("Error de escucha, reiniciando...")
+                android.os.Handler(mainLooper).postDelayed({ iniciarEscucha() }, 1000)
             }
 
             override fun onTimeout() {
-                // Vosk se detiene tras un silencio largo; lo reiniciamos
-                // para mantener la escucha continua todo el día.
-                speechService?.startListening(this)
+                // Reiniciamos con una instancia nueva de Recognizer, no la
+                // misma — evita que se quede "colgado" sin transcribir más.
+                iniciarEscucha()
             }
         })
     }
 
     private var procesandoNota = false
 
+    private var ultimaActividad = System.currentTimeMillis()
+
     private fun revisarTexto(json: String?) {
         if (json == null || procesandoNota) return
+        ultimaActividad = System.currentTimeMillis()
         val texto = try {
             JSONObject(json).optString("partial").ifEmpty {
                 JSONObject(json).optString("text")
@@ -153,6 +168,7 @@ class WakeWordService : Service() {
 
     private fun dispararGrabacion() {
         procesandoNota = true
+        ultimaActividad = System.currentTimeMillis()
         mostrarToastEnHilo("Frase detectada — grabando nota")
         // Pausamos la escucha de Vosk mientras se graba la nota: el
         // micrófono no puede ser usado por dos grabadores a la vez.
@@ -170,6 +186,30 @@ class WakeWordService : Service() {
             procesandoNota = false
             iniciarEscucha()
         }, 35_000)
+    }
+
+    /**
+     * Revisa cada 20s si Vosk sigue entregando resultados. Si pasó más
+     * tiempo sin actividad (y no estamos grabando una nota), reinicia la
+     * escucha — cubre el caso en que el hilo de audio muere en silencio,
+     * sin disparar onError ni onTimeout, algo frecuente en Huawei/EMUI
+     * cuando el sistema restringe procesos en segundo plano.
+     */
+    private fun iniciarVigilante() {
+        val handler = android.os.Handler(mainLooper)
+        val intervalo = 20_000L
+        val runnable = object : Runnable {
+            override fun run() {
+                val inactivo = System.currentTimeMillis() - ultimaActividad
+                if (!procesandoNota && inactivo > intervalo) {
+                    actualizarNotificacion("Reiniciando escucha (sin actividad)...")
+                    iniciarEscucha()
+                    ultimaActividad = System.currentTimeMillis()
+                }
+                handler.postDelayed(this, intervalo)
+            }
+        }
+        handler.postDelayed(runnable, intervalo)
     }
 
     private fun mostrarToastEnHilo(mensaje: String) {
