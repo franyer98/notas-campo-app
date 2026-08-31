@@ -23,6 +23,10 @@ jobs:
           curl -sL -o /tmp/model.zip https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip
           unzip -q /tmp/model.zip -d /tmp/model_extracted
           mv /tmp/model_extracted/vosk-model-small-es-0.42 app/src/main/assets/model-es
+          # Vosk-android espera un archivo "uuid" dentro del modelo (lo
+          # genera su propio build de referencia); este modelo no lo trae,
+          # así que lo creamos nosotros para que StorageService.unpack no falle.
+          uuidgen > app/src/main/assets/model-es/uuid
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
