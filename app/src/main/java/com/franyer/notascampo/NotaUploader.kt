@@ -30,7 +30,7 @@ object NotaUploader {
     /** Codifica los metadatos en el nombre del archivo: id__usuario__fechaIso.m4a */
     fun nombrePendiente(taskerId: String, usuario: String, fechaIso: String): String {
         val fechaSegura = fechaIso.replace(":", "-")
-        return "$taskerId__${usuario}__$fechaSegura.m4a"
+        return "${taskerId}__${usuario}__${fechaSegura}.m4a"
     }
 
     private fun parsearNombre(nombre: String): Triple<String, String, String>? {
