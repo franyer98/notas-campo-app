@@ -171,7 +171,7 @@ class WakeWordService : Service() {
                     if (!seguirEscuchando) break // pudo cambiar mientras leíamos
                     val huboResultado = recognizer.acceptWaveForm(bytes, bytes.size)
                     val json = if (huboResultado) recognizer.result else recognizer.partialResult
-                    procesarResultado(json, amplitud, contadorSilencio)
+                    procesarResultado(json, amplitud, huboResultado)
                 }
             } catch (e: Throwable) {
                 actualizarNotificacion("Error en hilo de audio: ${e.javaClass.simpleName} ${e.message}")
@@ -193,7 +193,7 @@ class WakeWordService : Service() {
     private var ultimaActividad = System.currentTimeMillis()
     private var ultimoAvisoAmplitud = 0L
 
-    private fun procesarResultado(json: String?, amplitud: Int, contadorSilencio: Int) {
+    private fun procesarResultado(json: String?, amplitud: Int, esResultadoFinal: Boolean) {
         if (json == null || procesandoNota) return
         ultimaActividad = System.currentTimeMillis()
 
@@ -215,7 +215,13 @@ class WakeWordService : Service() {
             actualizarNotificacion("$estado$textoMostrar")
         }
 
-        if (texto.lowercase().contains(fraseClave)) {
+        // Solo comparamos contra resultados FINALES (Vosk ya terminó de
+        // "asentar" esa frase), no parciales — los parciales cambian todo
+        // el tiempo mientras hablas y pueden contener coincidencias
+        // falsas momentáneas que luego se corrigen solas. Además exigimos
+        // que la frase aparezca como palabras completas, no como parte de
+        // otra palabra más larga.
+        if (esResultadoFinal && Regex("\\basistente\\s+campo\\b").containsMatchIn(texto.lowercase())) {
             dispararGrabacion()
         }
     }
